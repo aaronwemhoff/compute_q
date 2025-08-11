@@ -105,10 +105,15 @@ with col2:
     st.info("💡 **Tip:** Green cells in Excel = '≤' comparison, Red cells = '>' comparison. Categorical data uses exact matching.")
 
 # For each metric, create appropriate input widget based on data type
+# Skip "Solution" column as it's the recommendation output, not user input
 metric_inputs = {}
 weights = {}
 
 for m in metrics:
+    # Skip solution column - it's the output, not input
+    if 'solution' in m.lower():
+        continue
+        
     col_vals = platforms_df[m].dropna()
     data_type = data_types[m]
     
@@ -121,9 +126,19 @@ for m in metrics:
         # Add an "Other" option
         unique_values.append("Other")
         
+        # Set default values for specific metrics
+        default_index = 0
+        if m.lower() in ['data sensitivity']:
+            if "Open" in unique_values:
+                default_index = unique_values.index("Open")
+        elif m.lower() in ['software', 'software package']:
+            if "open-source" in unique_values:
+                default_index = unique_values.index("open-source")
+        
         selected = st.selectbox(
             f"Select your requirement for {m}:",
             options=unique_values,
+            index=default_index,
             key=f"select_{m}"
         )
         
@@ -164,6 +179,12 @@ for m in metrics:
         else:
             min_v, max_v, default_v = 0.0, 100.0, 50.0
 
+        # Set specific default values for certain metrics
+        if 'walltime' in m.lower() and 'hr' in m.lower():
+            default_v = 24.0
+        elif 'runs' in m.lower() and '#' in m.lower():
+            default_v = 1.0
+
         metric_inputs[m] = st.number_input(
             f"Enter your requirement for {m}:",
             min_value=float(min_v),
@@ -203,8 +224,14 @@ for p in platform_names:
     score = 0.0
     max_score = 0.0
     per_metric_match = {}
+    recommended_solution = ""
 
     for m in metrics:
+        # Skip solution column in scoring - it's the output
+        if 'solution' in m.lower():
+            recommended_solution = str(values_grid[p][m]) if pd.notna(values_grid[p][m]) else "N/A"
+            continue
+            
         user_val = metric_inputs[m]
         plat_val = values_grid[p][m]
         op = ops_grid[p][m]
@@ -227,7 +254,8 @@ for p in platform_names:
         "Score": round(score, 2),
         "Max Score": round(max_score, 2),
         "Match %": pct,
-        "Details": per_metric_match
+        "Details": per_metric_match,
+        "Recommended Solution": recommended_solution
     })
 
 # Sort by score descending, then by match percentage, then alphabetically
@@ -254,6 +282,8 @@ if results_sorted:
             with col1:
                 st.markdown(f"### #{i} {item['Platform']}")
                 st.markdown(f"**{item['Match %']}%** compatibility match")
+                if item['Recommended Solution']:
+                    st.markdown(f"🎯 **Recommended:** {item['Recommended Solution']}")
             
             with col2:
                 st.metric("Score", f"{item['Score']}/{item['Max Score']}")
@@ -271,6 +301,10 @@ if results_sorted:
                 # Create detailed comparison table
                 comparison_data = []
                 for metric in metrics:
+                    # Skip solution column in detailed comparison
+                    if 'solution' in metric.lower():
+                        continue
+                        
                     user_input = metric_inputs[metric]
                     platform_value = values_grid[item["Platform"]][metric]
                     rule = detect_operator_label(ops_grid[item["Platform"]][metric]).split('(')[0].strip()
