@@ -8,6 +8,34 @@ import numpy as np
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
 
+def safe_value_check(value):
+    """
+    Safely check if a value is valid (not None, not NaN, not empty)
+    Returns the string representation if valid, "N/A" otherwise
+    """
+    try:
+        if value is None:
+            return "N/A"
+        
+        # Handle pandas NaN
+        if hasattr(pd, 'isna') and pd.isna(value):
+            return "N/A"
+        
+        # Handle numpy NaN
+        if hasattr(value, '__len__') and len(str(value).strip()) == 0:
+            return "N/A"
+            
+        # Convert to string
+        str_val = str(value).strip()
+        if str_val.lower() in ['nan', 'none', '']:
+            return "N/A"
+            
+        return str_val
+        
+    except Exception:
+        # Fallback - just convert to string
+        return str(value) if value is not None else "N/A"
+
 def is_green_cell(cell):
     """Check if a cell has a green background (various shades)"""
     if cell.fill and cell.fill.start_color:
