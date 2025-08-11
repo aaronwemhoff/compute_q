@@ -106,14 +106,14 @@ with col2:
     st.info("💡 **Tip:** Green cells in Excel = '≤' comparison, Red cells = '>' comparison. Categorical data uses exact matching.")
 
 # For each metric, create appropriate input widget based on data type
-# Skip "Solution" column as it's the recommendation output, not user input
-# Include OS as a user input
+# Skip any "Solution" columns as they are recommendation outputs, not user inputs
+# Always include "Operating System" as a user input
 metric_inputs = {}
 weights = {}
 
 for m in metrics:
-    # Skip solution column - it's the output, not input
-    if 'solution' in m.lower() and 'recommended' in m.lower():
+    # Skip any solution-related columns - they're outputs, not inputs
+    if 'solution' in m.lower():
         continue
         
     col_vals = platforms_df[m].dropna()
@@ -136,8 +136,8 @@ for m in metrics:
         elif 'software' in m.lower():
             if "open-source" in unique_values:
                 default_index = unique_values.index("open-source")
-        elif 'os' in m.lower() or 'operating system' in m.lower():
-            # For OS, let user choose - no specific default
+        elif 'operating system' in m.lower() or m.lower() == 'os':
+            # For Operating System, let user choose - no specific default
             default_index = 0
         
         selected = st.selectbox(
@@ -232,8 +232,8 @@ for p in platform_names:
     recommended_solution = ""
 
     for m in metrics:
-        # Skip solution column in scoring - it's the output
-        if 'solution' in m.lower() and 'recommended' in m.lower():
+        # Skip any solution-related columns in scoring - they're outputs
+        if 'solution' in m.lower():
             recommended_solution = safe_value_check(values_grid[p][m])
             continue
             
@@ -306,8 +306,8 @@ if results_sorted:
                 # Create detailed comparison table
                 comparison_data = []
                 for metric in metrics:
-                    # Skip solution column in detailed comparison
-                    if 'solution' in metric.lower() and 'recommended' in metric.lower():
+                    # Skip any solution-related columns in detailed comparison
+                    if 'solution' in metric.lower():
                         continue
                         
                     user_input = metric_inputs[metric]
