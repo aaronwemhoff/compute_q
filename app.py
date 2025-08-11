@@ -8,6 +8,7 @@
 # 2) Uses dropdowns for categorical data (like OS, software, data sensitivity)
 # 3) Uses number inputs for numeric data (like cores, memory, walltime)
 # 4) Properly compares user inputs against platform capabilities based on data type
+# 5) Fixed all pd.notna() issues that were causing startup errors
 # ------------------------------
 
 import streamlit as st
@@ -121,7 +122,7 @@ for m in metrics:
     
     if data_type == 'categorical':
         # For categorical data, create a selectbox with unique values
-        unique_values = sorted([str(v) for v in col_vals.unique() if pd.notna(v)])
+        unique_values = sorted([str(v) for v in col_vals.unique() if str(v).strip() != '' and str(v).lower() != 'nan'])
         
         # Add an "Other" option
         unique_values.append("Other")
@@ -131,7 +132,7 @@ for m in metrics:
         if m.lower() in ['data sensitivity']:
             if "Open" in unique_values:
                 default_index = unique_values.index("Open")
-        elif m.lower() in ['software', 'software package']:
+        elif 'software' in m.lower():
             if "open-source" in unique_values:
                 default_index = unique_values.index("open-source")
         
@@ -282,7 +283,7 @@ if results_sorted:
             with col1:
                 st.markdown(f"### #{i} {item['Platform']}")
                 st.markdown(f"**{item['Match %']}%** compatibility match")
-                if item['Recommended Solution']:
+                if item['Recommended Solution'] and item['Recommended Solution'] != "N/A":
                     st.markdown(f"🎯 **Recommended:** {item['Recommended Solution']}")
             
             with col2:
