@@ -229,7 +229,11 @@ for p in platform_names:
     for m in metrics:
         # Skip solution column in scoring - it's the output
         if 'solution' in m.lower():
-            recommended_solution = str(values_grid[p][m]) if pd.notna(values_grid[p][m]) else "N/A"
+            solution_value = values_grid[p][m]
+            if solution_value is not None and not (isinstance(solution_value, float) and pd.isna(solution_value)):
+                recommended_solution = str(solution_value)
+            else:
+                recommended_solution = "N/A"
             continue
             
         user_val = metric_inputs[m]
