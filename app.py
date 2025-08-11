@@ -107,12 +107,13 @@ with col2:
 
 # For each metric, create appropriate input widget based on data type
 # Skip "Solution" column as it's the recommendation output, not user input
+# Include OS as a user input
 metric_inputs = {}
 weights = {}
 
 for m in metrics:
     # Skip solution column - it's the output, not input
-    if 'solution' in m.lower():
+    if 'solution' in m.lower() and 'recommended' in m.lower():
         continue
         
     col_vals = platforms_df[m].dropna()
@@ -135,6 +136,9 @@ for m in metrics:
         elif 'software' in m.lower():
             if "open-source" in unique_values:
                 default_index = unique_values.index("open-source")
+        elif 'os' in m.lower() or 'operating system' in m.lower():
+            # For OS, let user choose - no specific default
+            default_index = 0
         
         selected = st.selectbox(
             f"Select your requirement for {m}:",
@@ -229,7 +233,7 @@ for p in platform_names:
 
     for m in metrics:
         # Skip solution column in scoring - it's the output
-        if 'solution' in m.lower():
+        if 'solution' in m.lower() and 'recommended' in m.lower():
             recommended_solution = safe_value_check(values_grid[p][m])
             continue
             
@@ -303,7 +307,7 @@ if results_sorted:
                 comparison_data = []
                 for metric in metrics:
                     # Skip solution column in detailed comparison
-                    if 'solution' in metric.lower():
+                    if 'solution' in metric.lower() and 'recommended' in metric.lower():
                         continue
                         
                     user_input = metric_inputs[metric]
