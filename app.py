@@ -12,7 +12,7 @@
 
 import streamlit as st
 import pandas as pd
-from utils.parser import load_questionnaire, compare_value, detect_operator_label
+from utils.parser import load_questionnaire, compare_value, detect_operator_label, safe_value_check
 
 st.set_page_config(page_title="Research Platform Picker", page_icon="🔎", layout="wide")
 
@@ -229,11 +229,7 @@ for p in platform_names:
     for m in metrics:
         # Skip solution column in scoring - it's the output
         if 'solution' in m.lower():
-            solution_value = values_grid[p][m]
-            if solution_value is not None and not (isinstance(solution_value, float) and pd.isna(solution_value)):
-                recommended_solution = str(solution_value)
-            else:
-                recommended_solution = "N/A"
+            recommended_solution = safe_value_check(values_grid[p][m])
             continue
             
         user_val = metric_inputs[m]
@@ -317,7 +313,7 @@ if results_sorted:
                     comparison_data.append({
                         "Metric": metric,
                         "Your Input": str(user_input),
-                        "Platform Value": str(platform_value) if pd.notna(platform_value) else "N/A",
+                        "Platform Value": safe_value_check(platform_value),
                         "Comparison Rule": rule,
                         "Result": status,
                         "Data Type": data_types[metric].title()
