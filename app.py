@@ -79,16 +79,42 @@ values_grid = data['values_grid']       # values per platform x metric
 data_types = data['data_types']         # data type per metric ('numeric' or 'categorical')
 platform_names = platforms_df.index.tolist()
 
+# Get the first column name (should be OS)
+first_column = platforms_df.columns[0] if len(platforms_df.columns) > 0 else None
+
 # Identify which metrics are inputs vs outputs
 input_metrics = []
 output_metrics = []
+
+# Always include the first column (OS) as an input if it exists
+if first_column and first_column not in metrics:
+    input_metrics.append(first_column)
+    # Add it to metrics list and other data structures
+    metrics.insert(0, first_column)
+    # Determine data type for the first column
+    first_col_vals = platforms_df[first_column].dropna()
+    try:
+        # Try to convert to numeric
+        [float(v) for v in first_col_vals if str(v).strip()]
+        data_types[first_column] = 'numeric'
+    except (ValueError, TypeError):
+        data_types[first_column] = 'categorical'
+    
+    # Set default operators and values for the first column
+    if first_column not in ops_grid:
+        ops_grid[first_column] = {}
+        values_grid[first_column] = {}
+        for p in platform_names:
+            ops_grid[p][first_column] = 'eq'  # Default to exact match for OS
+            values_grid[p][first_column] = platforms_df.loc[p, first_column]
 
 for m in metrics:
     # Solution columns are outputs, not inputs
     if ('solution' in m.lower() and ('recommended' in m.lower() or 'suggest' in m.lower())) or m.lower().strip() == 'solution':
         output_metrics.append(m)
     else:
-        input_metrics.append(m)
+        if m not in input_metrics:  # Avoid duplicates
+            input_metrics.append(m)
 
 # ---- Display a preview of parsed data (collapsible)
 with st.expander("🔍 Preview parsed data (from Excel)", expanded=False):
