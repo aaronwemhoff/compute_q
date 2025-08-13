@@ -9,6 +9,7 @@
 # 3) Uses number inputs for numeric data (like cores, memory, walltime)
 # 4) Properly compares user inputs against platform capabilities based on data type
 # 5) Fixed all pd.notna() issues that were causing startup errors
+# 6) FIXED: "Solution" is now properly shown as output, "Operating System" as input
 # ------------------------------
 
 import streamlit as st
@@ -78,6 +79,17 @@ values_grid = data['values_grid']       # values per platform x metric
 data_types = data['data_types']         # data type per metric ('numeric' or 'categorical')
 platform_names = platforms_df.index.tolist()
 
+# Identify which metrics are inputs vs outputs
+input_metrics = []
+output_metrics = []
+
+for m in metrics:
+    # Solution columns are outputs, not inputs
+    if ('solution' in m.lower() and ('recommended' in m.lower() or 'suggest' in m.lower())) or m.lower().strip() == 'solution':
+        output_metrics.append(m)
+    else:
+        input_metrics.append(m)
+
 # ---- Display a preview of parsed data (collapsible)
 with st.expander("🔍 Preview parsed data (from Excel)", expanded=False):
     st.write("**Platforms** (rows) and **metrics** (columns) with detected data types:")
@@ -85,7 +97,8 @@ with st.expander("🔍 Preview parsed data (from Excel)", expanded=False):
     # Show data types
     type_info = pd.DataFrame({
         'Metric': metrics,
-        'Data Type': [data_types[m] for m in metrics]
+        'Data Type': [data_types[m] for m in metrics],
+        'Role': ['Output' if m in output_metrics else 'Input' for m in metrics]
     })
     st.dataframe(type_info, hide_index=True)
     
@@ -105,17 +118,11 @@ with col1:
 with col2:
     st.info("💡 **Tip:** Green cells in Excel = '≤' comparison, Red cells = '>' comparison. Categorical data uses exact matching.")
 
-# For each metric, create appropriate input widget based on data type
-# Skip any "Solution" columns as they are recommendation outputs, not user inputs
-# Always include "Operating System" as a user input
+# For each INPUT metric, create appropriate input widget based on data type
 metric_inputs = {}
 weights = {}
 
-for m in metrics:
-    # Skip any solution-related columns - they're outputs, not inputs
-    if 'solution' in m.lower():
-        continue
-        
+for m in input_metrics:  # Only process input metrics
     col_vals = platforms_df[m].dropna()
     data_type = data_types[m]
     
@@ -136,9 +143,12 @@ for m in metrics:
         elif 'software' in m.lower():
             if "open-source" in unique_values:
                 default_index = unique_values.index("open-source")
-        elif 'operating system' in m.lower() or m.lower() == 'os':
-            # For Operating System, let user choose - no specific default
-            default_index = 0
+        elif 'os' in m.lower() or 'operating system' in m.lower():
+            # For OS, let user choose - no specific default, but prefer common ones
+            for preferred in ["Windows", "Linux", "macOS", "Unix"]:
+                if preferred in unique_values:
+                    default_index = unique_values.index(preferred)
+                    break
         
         selected = st.selectbox(
             f"Select your requirement for {m}:",
@@ -229,14 +239,10 @@ for p in platform_names:
     score = 0.0
     max_score = 0.0
     per_metric_match = {}
-    recommended_solution = ""
+    output_values = {}  # Store output values (like recommended solutions)
 
-    for m in metrics:
-        # Skip any solution-related columns in scoring - they're outputs
-        if 'solution' in m.lower():
-            recommended_solution = safe_value_check(values_grid[p][m])
-            continue
-            
+    # Process input metrics for scoring
+    for m in input_metrics:
         user_val = metric_inputs[m]
         plat_val = values_grid[p][m]
         op = ops_grid[p][m]
@@ -253,6 +259,10 @@ for p in platform_names:
         else:
             per_metric_match[m] = f"❌ No match ({detect_operator_label(op).split('(')[0].strip()})"
 
+    # Process output metrics (like Solution)
+    for m in output_metrics:
+        output_values[m] = safe_value_check(values_grid[p][m])
+
     pct = 0.0 if max_score == 0 else round(100.0 * score / max_score, 1)
     results.append({
         "Platform": p,
@@ -260,7 +270,7 @@ for p in platform_names:
         "Max Score": round(max_score, 2),
         "Match %": pct,
         "Details": per_metric_match,
-        "Recommended Solution": recommended_solution
+        "Outputs": output_values  # Store all output values
     })
 
 # Sort by score descending, then by match percentage, then alphabetically
@@ -287,8 +297,11 @@ if results_sorted:
             with col1:
                 st.markdown(f"### #{i} {item['Platform']}")
                 st.markdown(f"**{item['Match %']}%** compatibility match")
-                if item['Recommended Solution'] and item['Recommended Solution'] != "N/A":
-                    st.markdown(f"🎯 **Recommended:** {item['Recommended Solution']}")
+                
+                # Display all output values (like recommended solutions)
+                for output_metric, output_value in item['Outputs'].items():
+                    if output_value and output_value != "N/A" and str(output_value).strip():
+                        st.markdown(f"🎯 **{output_metric}:** {output_value}")
             
             with col2:
                 st.metric("Score", f"{item['Score']}/{item['Max Score']}")
@@ -305,11 +318,7 @@ if results_sorted:
             with st.expander("📋 Detailed comparison"):
                 # Create detailed comparison table
                 comparison_data = []
-                for metric in metrics:
-                    # Skip any solution-related columns in detailed comparison
-                    if 'solution' in metric.lower():
-                        continue
-                        
+                for metric in input_metrics:  # Only show input metrics in comparison
                     user_input = metric_inputs[metric]
                     platform_value = values_grid[item["Platform"]][metric]
                     rule = detect_operator_label(ops_grid[item["Platform"]][metric]).split('(')[0].strip()
@@ -326,6 +335,18 @@ if results_sorted:
                 
                 comp_df = pd.DataFrame(comparison_data)
                 st.dataframe(comp_df, hide_index=True, use_container_width=True)
+                
+                # Show output metrics separately
+                if output_metrics:
+                    st.markdown("**Platform Outputs:**")
+                    output_data = []
+                    for output_metric in output_metrics:
+                        output_data.append({
+                            "Output Metric": output_metric,
+                            "Platform Value": item['Outputs'][output_metric]
+                        })
+                    output_df = pd.DataFrame(output_data)
+                    st.dataframe(output_df, hide_index=True, use_container_width=True)
 
 else:
     st.warning("No platforms found in the data. Please check your Excel file.")
@@ -359,8 +380,9 @@ st.markdown("""
 - **Red cells** mean the platform works if your input is **>** the platform's value  
 - **Uncolored cells** default to **≥** for numeric data or **exact match** for text data
 - Each matching criterion adds points to the platform's score
+- **Solution/Output columns** show platform recommendations and are not used for scoring
 - Results are ranked by total score and match percentage
 """)
 
 # Footer
-st.caption("Built with ❤️ using Streamlit | Updated to handle mixed data types")
+st.caption("Built with ❤️ using Streamlit | Updated to handle mixed data types with proper input/output separation")
