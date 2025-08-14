@@ -163,9 +163,14 @@ for c in df.columns:
         solution_col = c
         break
 
+# If no "Solution" column found, use the first column (Column A) as the solution
 if solution_col is None:
-    st.error("No `Solution` column was found in your headers (line 4). Please ensure one column is named exactly `Solution`.")
-    st.stop()
+    if len(df.columns) > 0:
+        solution_col = df.columns[0]  # Use first column as solution
+        st.info(f"No 'Solution' column found. Using first column '{solution_col}' as the solution/platform name.")
+    else:
+        st.error("No columns found in the spreadsheet. Please check the file format.")
+        st.stop()
 
 input_cols: List[str] = [c for c in df.columns if c != solution_col]
 
