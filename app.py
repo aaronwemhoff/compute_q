@@ -1,414 +1,251 @@
 # app.py
-# ------------------------------
-# Updated Streamlit app that handles mixed data types (numeric and categorical)
-# from Excel questionnaire for research platform selection.
-#
-# Key improvements:
-# 1) Handles both numeric and text data appropriately
-# 2) Uses dropdowns for categorical data (like OS, software, data sensitivity)
-# 3) Uses number inputs for numeric data (like cores, memory, walltime)
-# 4) Properly compares user inputs against platform capabilities based on data type
-# 5) Fixed all pd.notna() issues that were causing startup errors
-# 6) FIXED: "Solution" is now properly shown as output, "Operating System" as input
-# ------------------------------
+# ---------------------------------------------------------------
+# A beginner-friendly Streamlit app that reads your Excel file,
+# shows a questionnaire to the user, and recommends matching
+# "Solution(s)" based on cell colors (green => <=, red => >).
+# ---------------------------------------------------------------
+import os
+import tempfile
+from typing import Dict, List, Tuple
 
 import streamlit as st
 import pandas as pd
-from utils.parser import load_questionnaire, compare_value, detect_operator_label, safe_value_check
 
-st.set_page_config(page_title="Research Platform Picker", page_icon="🔎", layout="wide")
+# Create utils directory and files if they don't exist
+if not os.path.exists('utils'):
+    os.makedirs('utils')
 
-# ---- Sidebar: App options
-st.sidebar.title("⚙️ App Settings")
+# Create __init__.py for utils module
+if not os.path.exists('utils/__init__.py'):
+    with open('utils/__init__.py', 'w') as f:
+        f.write('')
 
-st.sidebar.markdown("""
-**Excel assumptions (can be changed below):**
-- Headers on row **4**
-- Data rows from **5** to **25**
-- First column = platform name
-- Green cell ⇒ use **≤**; Red cell ⇒ use **>**
-- Mixed data types supported (numeric & text)
-""")
+# Simple implementation of the missing utility functions
+def try_float(value):
+    """Convert a value to float if possible, otherwise return None."""
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None
 
-default_header_row = 4
-default_start_row = 5
-default_end_row = 25
+def score_row(inputs: Dict, row: pd.Series, op_map: Dict, row_idx: int, input_cols: List[str]) -> Tuple[int, int]:
+    """
+    Score a row against user inputs.
+    Returns (matched_count, considered_count)
+    """
+    matched = 0
+    considered = 0
+    
+    for col in input_cols:
+        user_val = try_float(inputs.get(col))
+        cell_val = try_float(row.get(col))
+        
+        # Skip if either value is not numeric
+        if user_val is None or cell_val is None:
+            continue
+            
+        considered += 1
+        
+        # Get the operator for this cell (default to >= if not found)
+        op = op_map.get((row_idx, col), 'ge')
+        
+        # Apply the comparison rule
+        if op == 'le':  # Green cell: user_val <= cell_val
+            if user_val <= cell_val:
+                matched += 1
+        elif op == 'gt':  # Red cell: user_val > cell_val
+            if user_val > cell_val:
+                matched += 1
+        else:  # Default: user_val >= cell_val
+            if user_val >= cell_val:
+                matched += 1
+    
+    return matched, considered
 
-header_row = st.sidebar.number_input("Header row (1-indexed)", min_value=1, value=default_header_row, step=1)
-start_row = st.sidebar.number_input("Start data row (1-indexed)", min_value=1, value=default_start_row, step=1)
-end_row = st.sidebar.number_input("End data row (1-indexed)", min_value=start_row, value=default_end_row, step=1)
+class Questionnaire:
+    """Simple questionnaire parser for Excel files."""
+    
+    def __init__(self, header_row=4, start_row=5, end_row=25):
+        self.header_row = header_row - 1  # Convert to 0-based
+        self.start_row = start_row - 1    # Convert to 0-based  
+        self.end_row = end_row - 1        # Convert to 0-based
+    
+    def read_with_colors(self, file_path: str) -> Tuple[pd.DataFrame, Dict]:
+        """
+        Read Excel file and detect cell colors for comparison operators.
+        Returns (dataframe, operator_map)
+        """
+        try:
+            from openpyxl import load_workbook
+        except ImportError:
+            st.error("openpyxl is required. Please install it with: pip install openpyxl")
+            return None, None
+        
+        # Read the data using pandas
+        df = pd.read_excel(file_path, header=self.header_row, 
+                          skiprows=range(0, self.header_row) if self.header_row > 0 else None)
+        
+        # Limit to the specified row range
+        max_rows = min(len(df), self.end_row - self.start_row + 1)
+        df = df.head(max_rows)
+        
+        # Load workbook to check cell colors
+        wb = load_workbook(file_path, data_only=False)
+        ws = wb.active
+        
+        op_map = {}
+        
+        # Check colors for each data cell
+        for row_idx in range(len(df)):
+            excel_row = self.start_row + row_idx + 1  # Convert back to 1-based Excel row
+            for col_idx, col_name in enumerate(df.columns):
+                excel_col = col_idx + 1  # Convert to 1-based Excel column
+                cell = ws.cell(row=excel_row, column=excel_col)
+                
+                # Check if cell has a fill color
+                if cell.fill and cell.fill.start_color and cell.fill.start_color.index:
+                    color = cell.fill.start_color.index
+                    # Simple color detection (this may need adjustment based on your Excel file)
+                    if 'FF00FF00' in str(color) or 'FF92D050' in str(color):  # Green variants
+                        op_map[(row_idx, col_name)] = 'le'  # Less than or equal
+                    elif 'FFFF0000' in str(color) or 'FFFF6666' in str(color):  # Red variants
+                        op_map[(row_idx, col_name)] = 'gt'  # Greater than
+                    else:
+                        op_map[(row_idx, col_name)] = 'ge'  # Default: greater than or equal
+                else:
+                    op_map[(row_idx, col_name)] = 'ge'  # Default: greater than or equal
+        
+        return df, op_map
 
-st.sidebar.divider()
-st.sidebar.markdown("### 🧮 Scoring")
-st.sidebar.markdown("Each metric that matches the platform's rule contributes 1 point to the platform's score.")
-show_weights = st.sidebar.checkbox("Enable metric weights (advanced)", value=False, help="Assign importance to specific metrics.")
+st.set_page_config(page_title="Research Platform Selector", page_icon="🔍", layout="wide")
 
-st.sidebar.divider()
-st.sidebar.markdown("### 📄 Data Source")
-uploaded = st.sidebar.file_uploader(
-    "Upload your questionnaire Excel (.xlsx)", 
-    type=["xlsx"],
-    help="Upload your Excel file with platform data and colored cells indicating comparison rules."
+st.title("🔍 Research Platform Selector")
+st.write(
+    "Answer a few questions and I'll suggest the best **Solution** based on your Excel rules.\n\n"
+    "- **Green cells** mean '**≤**' (less than or equal to)\n"
+    "- **Red cells** mean '**>**' (greater than)\n"
+    "- Headers are on **line 4**; data is in **lines 5–25**; output column is **`Solution`**"
 )
 
-# Built-in default path
-DEFAULT_PATH = "Research Questionnaire Info.xlsx"
+# --------- Load Excel ----------
+DEFAULT_PATH = "Research Questionnaire Info.xlsx"  # Updated default path
+uploaded = st.file_uploader("📄 Upload Excel (e.g., Research Questionnaire Info.xlsx)", type=["xlsx"])
 
-# ---- Main Title
-st.title("🔎 Research Platform Picker")
-st.caption("Answer questions about your research needs and get ranked platform recommendations based on your Excel rules.")
+# Initialize session state for temp directory
+if "_tmp_dir" not in st.session_state:
+    st.session_state["_tmp_dir"] = tempfile.gettempdir()
 
-# ---- Load data (either user upload or default file)
-xlsx_path = uploaded if uploaded is not None else DEFAULT_PATH
+q = Questionnaire()  # knows header/data rows
+df = None
+op_map = None
+error = None
 
-try:
-    data = load_questionnaire(
-        xlsx_path, 
-        header_row=header_row, 
-        start_row=start_row, 
-        end_row=end_row
-    )
-except Exception as e:
-    st.error(f"Could not read the Excel file. Please upload the correct .xlsx file. Error: {e}")
+if uploaded is not None:
+    # Save a temp copy so openpyxl can inspect styles/colors
+    tmp_path = os.path.join(st.session_state.get("_tmp_dir", "."), "uploaded.xlsx")
+    with open(tmp_path, "wb") as f:
+        f.write(uploaded.read())
+    df, op_map = q.read_with_colors(tmp_path)
+elif os.path.exists(DEFAULT_PATH):
+    df, op_map = q.read_with_colors(DEFAULT_PATH)
+else:
+    st.info("Upload an Excel file or place 'Research Questionnaire Info.xlsx' in the app directory.")
     st.stop()
 
-platforms_df = data['platforms_df']     # platforms as rows
-metrics = data['metrics']               # list of metric names (columns excluding platform name)
-ops_grid = data['ops_grid']             # operators per platform x metric
-values_grid = data['values_grid']       # values per platform x metric
-data_types = data['data_types']         # data type per metric ('numeric' or 'categorical')
-platform_names = platforms_df.index.tolist()
+if df is None or op_map is None:
+    st.error("Couldn't read the spreadsheet. Please check the file format and try again.")
+    st.stop()
 
-# Get the first column name (should be OS)
-first_column = platforms_df.columns[0] if len(platforms_df.columns) > 0 else None
+# Validate presence of Solution column
+solution_col = None
+for c in df.columns:
+    if str(c).strip().lower() == "solution":
+        solution_col = c
+        break
 
-# Identify which metrics are inputs vs outputs
-input_metrics = []
-output_metrics = []
+if solution_col is None:
+    st.error("No `Solution` column was found in your headers (line 4). Please ensure one column is named exactly `Solution`.")
+    st.stop()
 
-# Always include the first column (OS) as an input if it exists
-if first_column and first_column not in metrics:
-    input_metrics.append(first_column)
-    # Add it to metrics list and other data structures
-    metrics.insert(0, first_column)
-    # Determine data type for the first column
-    first_col_vals = platforms_df[first_column].dropna()
-    try:
-        # Try to convert to numeric
-        [float(v) for v in first_col_vals if str(v).strip()]
-        data_types[first_column] = 'numeric'
-    except (ValueError, TypeError):
-        data_types[first_column] = 'categorical'
-    
-    # Set default operators and values for the first column
-    if first_column not in ops_grid:
-        ops_grid[first_column] = {}
-        values_grid[first_column] = {}
-        for p in platform_names:
-            ops_grid[p][first_column] = 'eq'  # Default to exact match for OS
-            values_grid[p][first_column] = platforms_df.loc[p, first_column]
+input_cols: List[str] = [c for c in df.columns if c != solution_col]
 
-for m in metrics:
-    # Solution columns are outputs, not inputs
-    if ('solution' in m.lower() and ('recommended' in m.lower() or 'suggest' in m.lower())) or m.lower().strip() == 'solution':
-        output_metrics.append(m)
-    else:
-        if m not in input_metrics:  # Avoid duplicates
-            input_metrics.append(m)
+with st.expander("🔍 Preview parsed data (from lines 5–25)"):
+    st.dataframe(df)
 
-# ---- Display a preview of parsed data (collapsible)
-with st.expander("🔍 Preview parsed data (from Excel)", expanded=False):
-    st.write("**Platforms** (rows) and **metrics** (columns) with detected data types:")
-    
-    # Show data types
-    type_info = pd.DataFrame({
-        'Metric': metrics,
-        'Data Type': [data_types[m] for m in metrics],
-        'Role': ['Output' if m in output_metrics else 'Input' for m in metrics]
-    })
-    st.dataframe(type_info, hide_index=True)
-    
-    st.write("**Platform data:**")
-    st.dataframe(platforms_df)
-    
-    st.write("**Detected comparison operators** (per platform × metric):")
-    st.dataframe(pd.DataFrame(ops_grid, index=platform_names, columns=metrics))
+# --------- Build Questionnaire UI ----------
+st.header("📋 Questionnaire")
+st.write("Provide values for each input below. If you leave some blank, those criteria will be skipped.")
 
-# ---- Build questionnaire inputs
-st.header("🧾 Questionnaire")
+with st.form("questionnaire_form", clear_on_submit=False):
+    inputs: Dict[str, float] = {}
+    for col in input_cols:
+        # Suggest a min/max range based on the column data
+        col_vals = pd.to_numeric(df[col], errors="coerce")
+        col_min = float(col_vals.min()) if col_vals.notna().any() else None
+        col_max = float(col_vals.max()) if col_vals.notna().any() else None
 
-col1, col2 = st.columns([3, 1])
-with col1:
-    st.write("Provide your requirements for each metric. The app will compare them to each platform's capabilities using the rules from your Excel sheet.")
-
-with col2:
-    st.info("💡 **Tip:** Green cells in Excel = '≤' comparison, Red cells = '>' comparison. Categorical data uses exact matching.")
-
-# For each INPUT metric, create appropriate input widget based on data type
-metric_inputs = {}
-weights = {}
-
-for m in input_metrics:  # Only process input metrics
-    col_vals = platforms_df[m].dropna()
-    data_type = data_types[m]
-    
-    st.subheader(f"📊 {m}")
-    
-    if data_type == 'categorical':
-        # For categorical data, create a selectbox with unique values
-        unique_values = sorted([str(v) for v in col_vals.unique() if str(v).strip() != '' and str(v).lower() != 'nan'])
-        
-        # Add an "Other" option
-        unique_values.append("Other")
-        
-        # Set default values for specific metrics
-        default_index = 0
-        if m.lower() in ['data sensitivity']:
-            if "Open" in unique_values:
-                default_index = unique_values.index("Open")
-        elif 'software' in m.lower():
-            if "open-source" in unique_values:
-                default_index = unique_values.index("open-source")
-        elif 'os' in m.lower() or 'operating system' in m.lower():
-            # For OS, let user choose - no specific default, but prefer common ones
-            for preferred in ["Windows", "Linux", "macOS", "Unix"]:
-                if preferred in unique_values:
-                    default_index = unique_values.index(preferred)
-                    break
-        
-        selected = st.selectbox(
-            f"Select your requirement for {m}:",
-            options=unique_values,
-            index=default_index,
-            key=f"select_{m}"
-        )
-        
-        if selected == "Other":
-            metric_inputs[m] = st.text_input(
-                f"Enter custom value for {m}:",
-                key=f"custom_{m}"
+        # Use number_input when the column looks numeric, else text_input
+        if col_vals.notna().any():
+            default = col_min if col_min is not None else 0.0
+            step = 1.0
+            # Simple heuristic: if values look like ints, step by 1
+            if col_vals.dropna().apply(lambda x: float(x).is_integer()).all():
+                step = 1.0
+            else:
+                step = 0.1
+            inputs[col] = st.number_input(
+                f"{col}",
+                value=default,
+                step=step,
+                help=f"Range in data: {col_min} – {col_max}" if col_min is not None and col_max is not None else "Enter a number"
             )
         else:
-            metric_inputs[m] = selected
-            
-        # Show common operator for this metric
-        op_counts = {}
-        for p in platform_names:
-            op = ops_grid[p][m]
-            op_counts[op] = op_counts.get(op, 0) + 1
-        common_op = max(op_counts, key=op_counts.get) if op_counts else 'eq'
-        
-        st.caption(f"ℹ️ Most platforms use: {detect_operator_label(common_op)}")
-        
+            # Non-numeric fallback
+            txt = st.text_input(f"{col} (text)")
+            inputs[col] = txt  # will be skipped in scorer if not numeric
+
+    submitted = st.form_submit_button("Find matching solutions")
+
+# --------- Matching Logic ----------
+if submitted:
+    # Score each row
+    results = []
+    for i, row in df.iterrows():
+        matched, considered = score_row(inputs, row, op_map, i, input_cols)
+        ratio = (matched / considered) if considered > 0 else 0.0
+        results.append({
+            "Solution": row[solution_col],
+            "Matched criteria": matched,
+            "Criteria considered": considered,
+            "Match %": round(100 * ratio, 1),
+        })
+
+    res_df = pd.DataFrame(results).sort_values(
+        by=["Match %", "Matched criteria"], ascending=[False, False]
+    ).reset_index(drop=True)
+
+    st.header("✅ Recommended Solutions")
+    if (res_df["Match %"] > 0).any():
+        st.success("Here are your top matches (sorted by match % and count):")
     else:
-        # For numeric data, create number input with reasonable bounds
-        numeric_vals = []
-        for val in col_vals:
-            try:
-                numeric_vals.append(float(val))
-            except (ValueError, TypeError):
-                pass
-        
-        if numeric_vals:
-            min_v = float(min(numeric_vals))
-            max_v = float(max(numeric_vals))
-            default_v = float(pd.Series(numeric_vals).median())
-            # Widen the range for flexibility
-            pad = max(1.0, (max_v - min_v) * 0.2)
-            min_v = max(0.0, min_v - pad)
-            max_v = max_v + pad
-        else:
-            min_v, max_v, default_v = 0.0, 100.0, 50.0
+        st.warning("No perfect matches based on numeric criteria. Showing closest matches:")
 
-        # Set specific default values for certain metrics
-        if 'walltime' in m.lower() and 'hr' in m.lower():
-            default_v = 24.0
-        elif 'runs' in m.lower() and '#' in m.lower():
-            default_v = 1.0
+    st.dataframe(res_df)
 
-        metric_inputs[m] = st.number_input(
-            f"Enter your requirement for {m}:",
-            min_value=float(min_v),
-            max_value=float(max_v),
-            value=float(default_v),
-            step=1.0 if max_v > 10 else 0.1,
-            key=f"number_{m}"
-        )
-        
-        # Show common operator for this metric
-        op_counts = {}
-        for p in platform_names:
-            op = ops_grid[p][m]
-            op_counts[op] = op_counts.get(op, 0) + 1
-        common_op = max(op_counts, key=op_counts.get) if op_counts else 'ge'
-        
-        st.caption(f"ℹ️ Most platforms use: {detect_operator_label(common_op)}")
+    top = res_df.iloc[0] if len(res_df) else None
+    if top is not None:
+        st.subheader("⭐ Top Pick")
+        st.write(f"**{top['Solution']}** – Matched **{top['Matched criteria']}** out of **{top['Criteria considered']}** criteria ({top['Match %']}%).")
 
-    # Optional weights
-    if show_weights:
-        weights[m] = st.slider(
-            f"Importance weight for '{m}'",
-            min_value=0.0, max_value=5.0, value=1.0, step=0.1,
-            help="Higher weights make this metric more important in the scoring.",
-            key=f"weight_{m}"
-        )
-    else:
-        weights[m] = 1.0
-    
-    st.divider()
-
-# ---- Compute scores
-st.header("🏆 Recommendations")
-
-results = []
-for p in platform_names:
-    score = 0.0
-    max_score = 0.0
-    per_metric_match = {}
-    output_values = {}  # Store output values (like recommended solutions)
-
-    # Process input metrics for scoring
-    for m in input_metrics:
-        user_val = metric_inputs[m]
-        plat_val = values_grid[p][m]
-        op = ops_grid[p][m]
-        data_type = data_types[m]
-
-        # Check if the comparison passes
-        ok = compare_value(user_val, plat_val, op, data_type)
-        w = weights[m]
-        max_score += w
-        
-        if ok:
-            score += w
-            per_metric_match[m] = f"✅ Match ({detect_operator_label(op).split('(')[0].strip()})"
-        else:
-            per_metric_match[m] = f"❌ No match ({detect_operator_label(op).split('(')[0].strip()})"
-
-    # Process output metrics (like Solution)
-    for m in output_metrics:
-        output_values[m] = safe_value_check(values_grid[p][m])
-
-    pct = 0.0 if max_score == 0 else round(100.0 * score / max_score, 1)
-    results.append({
-        "Platform": p,
-        "Score": round(score, 2),
-        "Max Score": round(max_score, 2),
-        "Match %": pct,
-        "Details": per_metric_match,
-        "Outputs": output_values  # Store all output values
-    })
-
-# Sort by score descending, then by match percentage, then alphabetically
-results_sorted = sorted(results, key=lambda r: (-r["Score"], -r["Match %"], r["Platform"]))
-
-# ---- Show Top N
-if results_sorted:
-    top_n = st.slider("How many top results to show?", min_value=1, max_value=len(results_sorted), value=min(5, len(results_sorted)))
-    
-    st.subheader(f"🥇 Top {top_n} Recommendations")
-
-    for i, item in enumerate(results_sorted[:top_n], 1):
-        # Color code the containers based on match percentage
-        if item['Match %'] >= 80:
-            border_color = "green"
-        elif item['Match %'] >= 60:
-            border_color = "orange" 
-        else:
-            border_color = "red"
-            
-        with st.container(border=True):
-            col1, col2 = st.columns([3, 1])
-            
-            with col1:
-                st.markdown(f"### #{i} {item['Platform']}")
-                st.markdown(f"**{item['Match %']}%** compatibility match")
-                
-                # Display all output values (like recommended solutions)
-                for output_metric, output_value in item['Outputs'].items():
-                    if output_value and output_value != "N/A" and str(output_value).strip():
-                        st.markdown(f"🎯 **{output_metric}:** {output_value}")
-            
-            with col2:
-                st.metric("Score", f"{item['Score']}/{item['Max Score']}")
-            
-            # Progress bar
-            progress_color = "normal"
-            if item['Match %'] >= 80:
-                progress_color = "normal"  # Green
-            elif item['Match %'] >= 60:
-                progress_color = "normal"  # Will appear as default blue
-            
-            st.progress(item['Match %'] / 100.0)
-
-            with st.expander("📋 Detailed comparison"):
-                # Create detailed comparison table
-                comparison_data = []
-                for metric in input_metrics:  # Only show input metrics in comparison
-                    user_input = metric_inputs[metric]
-                    platform_value = values_grid[item["Platform"]][metric]
-                    rule = detect_operator_label(ops_grid[item["Platform"]][metric]).split('(')[0].strip()
-                    status = item["Details"][metric]
-                    
-                    comparison_data.append({
-                        "Metric": metric,
-                        "Your Input": str(user_input),
-                        "Platform Value": safe_value_check(platform_value),
-                        "Comparison Rule": rule,
-                        "Result": status,
-                        "Data Type": data_types[metric].title()
-                    })
-                
-                comp_df = pd.DataFrame(comparison_data)
-                st.dataframe(comp_df, hide_index=True, use_container_width=True)
-                
-                # Show output metrics separately
-                if output_metrics:
-                    st.markdown("**Platform Outputs:**")
-                    output_data = []
-                    for output_metric in output_metrics:
-                        output_data.append({
-                            "Output Metric": output_metric,
-                            "Platform Value": item['Outputs'][output_metric]
-                        })
-                    output_df = pd.DataFrame(output_data)
-                    st.dataframe(output_df, hide_index=True, use_container_width=True)
-
-else:
-    st.warning("No platforms found in the data. Please check your Excel file.")
-
-# ---- Summary statistics
-if results_sorted:
-    st.divider()
-    st.subheader("📊 Summary Statistics")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("Total Platforms", len(results_sorted))
-    
-    with col2:
-        high_match = len([r for r in results_sorted if r['Match %'] >= 80])
-        st.metric("High Match (≥80%)", high_match)
-    
-    with col3:
-        med_match = len([r for r in results_sorted if 60 <= r['Match %'] < 80])
-        st.metric("Medium Match (60-79%)", med_match)
-    
-    with col4:
-        low_match = len([r for r in results_sorted if r['Match %'] < 60])
-        st.metric("Low Match (<60%)", low_match)
-
-st.divider()
-st.markdown("### 💡 How it works")
-st.markdown("""
-- **Green cells** in your Excel file mean the platform works if your input is **≤** the platform's value
-- **Red cells** mean the platform works if your input is **>** the platform's value  
-- **Uncolored cells** default to **≥** for numeric data or **exact match** for text data
-- Each matching criterion adds points to the platform's score
-- **Solution/Output columns** show platform recommendations and are not used for scoring
-- Results are ranked by total score and match percentage
-""")
-
-# Footer
-st.caption("Built with ❤️ using Streamlit | Updated to handle mixed data types with proper input/output separation")
+# --------- Help & Tips ----------
+with st.expander("ℹ️ How matching works (simple explanation)"):
+    st.markdown(
+        """
+        - Each row in your sheet represents a candidate **Solution** with thresholds for each input.
+        - For every input column:
+          - If the cell is **green**, we check: `your_value ≤ cell_value`.
+          - If the cell is **red**, we check: `your_value > cell_value`.
+          - If the cell has **no color** or values are **not numeric**, we **skip** that check.
+        - We count how many criteria matched for each Solution and sort by best match.
+        """
+    )
