@@ -255,16 +255,14 @@ def main():
     st.set_page_config(page_title="Research Platform Picker", page_icon="🔎", layout="wide")
     st.title("🔎 Research Platform Picker")
     st.write(
-        "This beginner-friendly app helps you compare your research needs against candidate platforms
-"
+        "This beginner-friendly app helps you compare your research needs against candidate platforms"
         "based on rules defined in an Excel file. All criteria are weighted equally."
     )
 
     # Sidebar configuration and file input
     st.sidebar.header("1) Data Source")
     st.sidebar.write(
-        "By default, the app loads **Research Questionnaire Info.xlsx** from this folder.
-"
+        "By default, the app loads **Research Questionnaire Info.xlsx** from this folder."
         "You can also upload a file with the same structure."
     )
 
