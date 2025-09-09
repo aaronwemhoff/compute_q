@@ -254,10 +254,6 @@ def evaluate_row(user_inputs: List, row_values: List, ops: List[str], col_names:
 def main():
     st.set_page_config(page_title="Research Platform Picker", page_icon="🔎", layout="wide")
     st.title("🔎 Research Platform Picker")
-    st.write(
-        "This beginner-friendly app helps you compare your research needs against candidate platforms"
-        "based on rules defined in an Excel file. All criteria are weighted equally."
-    )
 
     # Sidebar configuration and file input
     st.sidebar.header("1) Data Source")
