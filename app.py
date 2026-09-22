@@ -52,7 +52,10 @@ WalltimeBracket = Literal[
     "between 72 and 240 hours",
     "above 240 hours",
 ]
-GroupMemBracket = Literal["Yes", "No", "Not using COMSOL"]
+COMSOLGroupMemBracket = Literal["Yes", "No", "Not using COMSOL"]
+ANSYSGroupMemBracket = Literal["Yes", "No", "Not using ANSYS"]
+ABAQUSGroupMemBracket = Literal["Yes", "No", "Not using ABAQUS"]
+
 # on/off radio buttons for RAM requirement and GUI
 
 # ----------------------
@@ -83,12 +86,13 @@ sensitivity: Sensitivity = st.sidebar.selectbox(
 
 # (2) Software status
 software_status: SoftwareStatus = st.sidebar.selectbox(
-    "Software status",
+    "Software application",
     options=[
         "open source",
         "MATLAB",
         "COMSOL",
         "ANSYS",
+	"ABAQUS",
         "other commercial software",
     ],
     help=(
@@ -97,10 +101,22 @@ software_status: SoftwareStatus = st.sidebar.selectbox(
     ),
 )
 
-# (3) COMSOL group member?
-groupmem: GroupMemBracket = st.sidebar.selectbox(
+# (3a) COMSOL group member?
+COMSOLgroupmem: COMSOLGroupMemBracket = st.sidebar.selectbox(
     "Are you a member of the COMSOL user group?",
-    options=["Yes", "No", "Not using COMSOL"],
+    options=["No", "Yes"],
+)
+
+# (3b) ANSYS group member?
+ANSYSgroupmem: ANSYSGroupMemBracket = st.sidebar.selectbox(
+    "Are you a member of the ANSYS user group?",
+    options=["No", "Yes"],
+)
+
+# (3c) ABAQUS group member?
+ABAQUSgroupmem: ABAQUSGroupMemBracket = st.sidebar.selectbox(
+    "Are you a member of the ABAQUS user group?",
+    options=["No", "Yes"],
 )
 
 # (4) RAM > 512 GB? (Yes/No)
@@ -128,34 +144,90 @@ gui: bool = st.sidebar.radio(
     "Does your job require a Graphical User Interface?",
     options=["No", "Yes"],
     index=0,
-    help="If unsure, select No.",
+    help="Refers only to running on Augie. If unsure, select No.",
 ) == "Yes"
 
 # ----------------------
 # 6) Decision logic (the "rule engine")
 # ----------------------
-def recommend_platform(info_sensitivity: Sensitivity, cores: CoreBracket, software_status: SoftwareStatus, ram_over_512: bool, walltime: WalltimeBracket, gui: bool, groupmem: GroupMemBracket) -> str:
+def recommend_platform(info_sensitivity: Sensitivity, cores: CoreBracket, software_status: SoftwareStatus, ram_over_512: bool, walltime: WalltimeBracket, gui: bool, COMSOLgroupmem: COMSOLGroupMemBracket, ANSYSgroupmem: ANSYSGroupMemBracket, ABAQUSgroupmem: ABAQUSGroupMemBracket) -> str:
     """Return the platform recommendation string based on sensitivity and cores."""
 
     if info_sensitivity in ("ITAR", "PHI"):
         return "See UTS"
-
-    stat1 = 0
-    if software_status in ("open source", "MATLAB"):
-        stat1 = 1
+    
+    if software_status == "other commercial software":
+        return "See CRCF"
+    elif software_status == "MATLAB":
+        if ram_over_512:
+            return "Possible NSF ACCESS - see CRCF"
+        elif cores == "above 192":
+            return "Possible NSF ACCESS - see CRCF"
+        elif cores == "16 or less":
+            return "Possible OSG - see CRCF"
+        elif walltime == "above 240 hours":
+            return "Possible NSF ACCESS - see CRCF"
+        elif gui:
+            return "Possible NSF ACCESS (JetStream2) - see CRCF"
+        elif walltime == "between 72 and 240 hours":
+            return "Augie batch w/ long qos"
+        else:
+            return "Augie batch"
     elif software_status == "COMSOL":
-        if groupmem == "Yes":
-            stat1 = 1
-        elif groupmem == "Not using COMSOL":
-            stat1 = 1
+        if COMSOLgroupmem == "Yes":
+            if ram_over_512:
+                return "Possible NSF ACCESS - see CRCF"
+            elif cores == "above 192":
+                return "Possible NSF ACCESS - see CRCF"
+            elif cores == "16 or less":
+                return "Possible OSG - see CRCF"
+            elif walltime == "above 240 hours":
+                return "Possible NSF ACCESS - see CRCF"
+            elif gui:
+                return "Possible NSF ACCESS (JetStream2) - see CRCF"
+            elif walltime == "between 72 and 240 hours":
+                return "Augie batch w/ long qos"
+            else:
+                return "Augie batch"
         else:
             return "See CRCF"
     elif software_status == "ANSYS":
-        return "vDesktop"
+        if ANSYSgroupmem == "Yes":
+            if ram_over_512:
+                return "Possible NSF ACCESS - see CRCF"
+            elif cores == "above 192":
+                return "Possible NSF ACCESS - see CRCF"
+            elif cores == "16 or less":
+                return "Possible OSG - see CRCF"
+            elif walltime == "above 240 hours":
+                return "Possible NSF ACCESS - see CRCF"
+            elif gui:
+                return "Possible NSF ACCESS (JetStream2) - see CRCF"
+            elif walltime == "between 72 and 240 hours":
+                return "Augie batch w/ long qos"
+            else:
+                return "Augie batch"
+        else:
+            return "See CRCF"
+    elif software_status == "ABAQUS":
+        if ABAQUSgroupmem == "Yes":
+            if ram_over_512:
+                return "Possible NSF ACCESS - see CRCF"
+            elif cores == "above 192":
+                return "Possible NSF ACCESS - see CRCF"
+            elif cores == "16 or less":
+                return "Possible OSG - see CRCF"
+            elif walltime == "above 240 hours":
+                return "Possible NSF ACCESS - see CRCF"
+            elif gui:
+                return "Possible NSF ACCESS (JetStream2) - see CRCF"
+            elif walltime == "between 72 and 240 hours":
+                return "Augie batch w/ long qos"
+            else:
+                return "Augie batch"
+        else:
+            return "See CRCF"
     else:
-        return "See CRCF"
-
-    if stat1 == 1:
         if ram_over_512:
             return "NSF ACCESS"
         elif cores == "above 192":
@@ -194,12 +266,14 @@ with left:
 with right:
     st.write("**Cores required:**", cores)
     st.write("**Walltime required:**", walltime)
-    st.write("**COMSOL group member:**", groupmem)
+    st.write("**COMSOL group member:**", COMSOLgroupmem)
+    st.write("**ANSYS group member:**", ANSYSgroupmem)
+    st.write("**ABAQUS group member:**", ABAQUSgroupmem)
 
 # Button to compute the recommendation (purely for teaching/UX; we could also do it live)
 if st.button("Get recommendation"):
 
-    decision = recommend_platform(sensitivity, cores, software_status, ram_over_512, walltime, gui, groupmem)
+    decision = recommend_platform(sensitivity, cores, software_status, ram_over_512, walltime, gui, COMSOLgroupmem, ANSYSgroupmem, ABAQUSgroupmem)
 
     # Friendly, visual output with an explanation
     if decision == "See UTS":
@@ -208,9 +282,6 @@ if st.button("Get recommendation"):
     elif decision == "See CRCF":
       st.info("**See CRCF**")
       st.caption("Your request is unique but may be able to be addressed. Please contact CRCF to discuss.")
-    elif decision == "vDesktop":
-      st.info("**vDesktop**")
-      st.caption("Use vDesktop to run this software package.")
     elif decision == "Augie batch w/ long qos":
       st.info("**Augie batch /w long qos**")
       st.caption("Use Augie batch queue with long qos.")
@@ -223,6 +294,12 @@ if st.button("Get recommendation"):
     elif decision == "Possible OSG - see CRCF":
       st.info("**Possible OSG - see CRCF")
       st.caption("Your needs may be well met using the Open Science Grid. Please contact CRCF to get more information.")
+    elif decision == "Possible NSF ACCESS - see CRCF":
+      st.info("**Possible NSF ACCESS - see CRCF")
+      st.caption("Your needs may be well met using NSF ACCESS. Please contact CRCF to get more information.")
+    elif decision == "Possible NSF ACCESS (JetStream2) - see CRCF":
+      st.info("**Possible NSF ACCESS (JetStream2) - see CRCF")
+      st.caption("Your needs may be well met using JetStream2. Please contact CRCF to get more information.")
     else:
       st.success("**Use Augie**")
       st.caption("Use the standard Augie batch queue.")
